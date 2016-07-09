@@ -1,9 +1,12 @@
 /*
- * xpress_decompress.c - A decompressor for the XPRESS compression format
- * (Huffman variant), which can be used in "System Compressed" files.  This is
- * based on the code from wimlib.
+ * xpress_decompress.c
  *
- * Copyright (C) 2015 Eric Biggers
+ * A decompressor for the XPRESS compression format (Huffman variant).
+ */
+
+/*
+ *
+ * Copyright (C) 2012-2016 Eric Biggers
  *
  * This program is free software: you can redistribute it and/or modify it under
  * the terms of the GNU General Public License as published by the Free Software
@@ -19,80 +22,85 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+
+/*
+ * The XPRESS compression format is an LZ77 and Huffman-code based algorithm.
+ * That means it is fairly similar to LZX compression, but XPRESS is simpler, so
+ * it is a little faster to compress and decompress.
+ *
+ * The XPRESS compression format is mostly documented in a file called "[MS-XCA]
+ * Xpress Compression Algorithm".  In the MSDN library, it can currently be
+ * found under Open Specifications => Protocols => Windows Protocols => Windows
+ * Server Protocols => [MS-XCA] Xpress Compression Algorithm".  The format in
+ * WIMs is specifically the algorithm labeled as the "LZ77+Huffman Algorithm"
+ * (there apparently are some other versions of XPRESS as well).
+ *
+ * If you are already familiar with the LZ77 algorithm and Huffman coding, the
+ * XPRESS format is fairly simple.  The compressed data begins with 256 bytes
+ * that contain 512 4-bit integers that are the lengths of the symbols in the
+ * Huffman code used for match/literal headers.  In contrast with more
+ * complicated formats such as DEFLATE and LZX, this is the only Huffman code
+ * that is used for the entirety of the XPRESS compressed data, and the codeword
+ * lengths are not encoded with a pretree.
+ *
+ * The rest of the compressed data is Huffman-encoded symbols.  Values 0 through
+ * 255 represent the corresponding literal bytes.  Values 256 through 511
+ * represent matches and may require extra bits or bytes to be read to get the
+ * match offset and match length.
+ *
+ * The trickiest part is probably the way in which literal bytes for match
+ * lengths are interleaved in the bitstream.
+ *
+ * Also, a caveat--- according to Microsoft's documentation for XPRESS,
+ *
+ *	"Some implementation of the decompression algorithm expect an extra
+ *	symbol to mark the end of the data.  Specifically, some implementations
+ *	fail during decompression if the Huffman symbol 256 is not found after
+ *	the actual data."
+ *
+ * This is the case with Microsoft's implementation in WIMGAPI, for example.  So
+ * although our implementation doesn't currently check for this extra symbol,
+ * compressors would be wise to add it.
+ */
+
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+#  include "config.h"
 #endif
-
-#include <errno.h>
-#include <stdlib.h>
-
-#include <ntfs-3g/misc.h>
 
 #include "decompress_common.h"
 #include "system_compression.h"
-
-#define XPRESS_NUM_SYMBOLS	512
-#define XPRESS_MAX_CODEWORD_LEN	15
-#define XPRESS_MIN_MATCH_LEN	3
+#include "xpress_constants.h"
 
 /* This value is chosen for fast decompression.  */
-#define XPRESS_TABLEBITS 12
+#define XPRESS_TABLEBITS 11
 
-/* Reusable heap-allocated memory for XPRESS decompression  */
 struct xpress_decompressor {
+	union {
+		DECODE_TABLE(decode_table, XPRESS_NUM_SYMBOLS,
+			     XPRESS_TABLEBITS, XPRESS_MAX_CODEWORD_LEN);
+		u8 lens[XPRESS_NUM_SYMBOLS];
+	};
+	DECODE_TABLE_WORKING_SPACE(working_space, XPRESS_NUM_SYMBOLS,
+				   XPRESS_MAX_CODEWORD_LEN);
+} _aligned_attribute(DECODE_TABLE_ALIGNMENT);
 
-	/* The Huffman decoding table  */
-	u16 decode_table[(1 << XPRESS_TABLEBITS) + 2 * XPRESS_NUM_SYMBOLS];
-
-	/* An array that maps symbols to codeword lengths  */
-	u8 lens[XPRESS_NUM_SYMBOLS];
-
-	/* Temporary space for make_huffman_decode_table()  */
-	u16 working_space[2 * (1 + XPRESS_MAX_CODEWORD_LEN) +
-			  XPRESS_NUM_SYMBOLS];
-};
-
-/*
- * xpress_allocate_decompressor - Allocate an XPRESS decompressor
- *
- * Return the pointer to the decompressor on success, or return NULL and set
- * errno on failure.
- */
-struct xpress_decompressor *xpress_allocate_decompressor(void)
+int
+xpress_decompress(struct xpress_decompressor *restrict d,
+		  const void *restrict compressed_data, size_t compressed_size,
+		  void *restrict uncompressed_data, size_t uncompressed_size)
 {
-	return ntfs_malloc(sizeof(struct xpress_decompressor));
-}
-
-/*
- * xpress_decompress - Decompress a buffer of XPRESS-compressed data
- *
- * @decompressor:       A decompressor that was allocated with
- *			xpress_allocate_decompressor()
- * @compressed_data:	The buffer of data to decompress
- * @compressed_size:	Number of bytes of compressed data
- * @uncompressed_data:	The buffer in which to store the decompressed data
- * @uncompressed_size:	The number of bytes the data decompresses into
- *
- * Return 0 on success, or return -1 and set errno on failure.
- */
-int xpress_decompress(struct xpress_decompressor *decompressor,
-		      const void *compressed_data, size_t compressed_size,
-		      void *uncompressed_data, size_t uncompressed_size)
-{
-	struct xpress_decompressor *d = decompressor;
 	const u8 * const in_begin = compressed_data;
 	u8 * const out_begin = uncompressed_data;
 	u8 *out_next = out_begin;
 	u8 * const out_end = out_begin + uncompressed_size;
 	struct input_bitstream is;
-	unsigned i;
 
 	/* Read the Huffman codeword lengths.  */
 	if (compressed_size < XPRESS_NUM_SYMBOLS / 2)
-		goto invalid;
-	for (i = 0; i < XPRESS_NUM_SYMBOLS / 2; i++) {
-		d->lens[i*2 + 0] = in_begin[i] & 0xF;
-		d->lens[i*2 + 1] = in_begin[i] >> 4;
+		return -1;
+	for (int i = 0; i < XPRESS_NUM_SYMBOLS / 2; i++) {
+		d->lens[2 * i + 0] = in_begin[i] & 0xf;
+		d->lens[2 * i + 1] = in_begin[i] >> 4;
 	}
 
 	/* Build a decoding table for the Huffman code.  */
@@ -100,7 +108,7 @@ int xpress_decompress(struct xpress_decompressor *decompressor,
 				      XPRESS_TABLEBITS, d->lens,
 				      XPRESS_MAX_CODEWORD_LEN,
 				      d->working_space))
-		goto invalid;
+		return -1;
 
 	/* Decode the matches and literals.  */
 
@@ -115,7 +123,7 @@ int xpress_decompress(struct xpress_decompressor *decompressor,
 
 		sym = read_huffsym(&is, d->decode_table,
 				   XPRESS_TABLEBITS, XPRESS_MAX_CODEWORD_LEN);
-		if (sym < 256) {
+		if (sym < XPRESS_NUM_CHARS) {
 			/* Literal  */
 			*out_next++ = sym;
 		} else {
@@ -135,30 +143,26 @@ int xpress_decompress(struct xpress_decompressor *decompressor,
 			}
 			length += XPRESS_MIN_MATCH_LEN;
 
-			if (offset > (size_t)(out_next - out_begin))
-				goto invalid;
+			if (unlikely(lz_copy(length, offset,
+					     out_begin, out_next, out_end,
+					     XPRESS_MIN_MATCH_LEN)))
+				return -1;
 
-			if (length > (size_t)(out_end - out_next))
-				goto invalid;
-
-			out_next = lz_copy(out_next, length, offset, out_end,
-					   XPRESS_MIN_MATCH_LEN);
+			out_next += length;
 		}
 	}
 	return 0;
-
-invalid:
-	errno = EINVAL;
-	return -1;
 }
 
-/*
- * xpress_free_decompressor - Free an XPRESS decompressor
- *
- * @decompressor:       A decompressor that was allocated with
- *			xpress_allocate_decompressor(), or NULL.
- */
-void xpress_free_decompressor(struct xpress_decompressor *decompressor)
+struct xpress_decompressor *
+xpress_allocate_decompressor(void)
 {
-	free(decompressor);
+	return aligned_malloc(sizeof(struct xpress_decompressor),
+			      DECODE_TABLE_ALIGNMENT);
+}
+
+void
+xpress_free_decompressor(struct xpress_decompressor *d)
+{
+	aligned_free(d);
 }

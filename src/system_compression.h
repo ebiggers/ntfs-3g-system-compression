@@ -60,7 +60,8 @@ extern void xpress_free_decompressor(struct xpress_decompressor *decompressor);
 
 struct lzx_decompressor;
 
-extern struct lzx_decompressor *lzx_allocate_decompressor(void);
+extern struct lzx_decompressor *
+lzx_allocate_decompressor(size_t max_block_size);
 
 extern int lzx_decompress(struct lzx_decompressor *decompressor,
 			  const void *compressed_data, size_t compressed_size,

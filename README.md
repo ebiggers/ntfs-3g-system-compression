@@ -34,7 +34,22 @@ directory (`$libdir`).  An example full path to the installed plugin is
 platforms.  `make install` will create the plugin directory if it does not
 already exist.
 
-# License
+# Implementation note
+
+The XPRESS and LZX decompression formats used in system-compressed files are
+identical to the formats used in Windows Imaging (WIM) archives.  Therefore, for
+the system compression plugin I borrowed the XPRESS and LZX decompressors I had
+already written for the wimlib project (https://wimlib.net/).  I made some
+slight modifications for integration purposes.  The code in wimlib is currently
+licensed LGPLv3+, but I have relicensed the version in this plugin to GPLv2+ for
+consistency with NTFS-3G's license.  (Public domain portions remain public
+domain.)
+
+# Notices
+
+The NTFS-3G system compression plugin was written by Eric Biggers, with
+contributions from Jean-Pierre André.  You can contact the author at
+ebiggers3@gmail.com.
 
 This software may be redistributed and/or modified under the terms of the GNU
 General Public License as published by the Free Software Foundation, either

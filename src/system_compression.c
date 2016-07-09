@@ -211,7 +211,7 @@ struct ntfs_system_decompression_ctx {
 static int allocate_decompressor(struct ntfs_system_decompression_ctx *ctx)
 {
 	if (ctx->format == FORMAT_LZX)
-		ctx->decompressor = lzx_allocate_decompressor();
+		ctx->decompressor = lzx_allocate_decompressor(32768);
 	else
 		ctx->decompressor = xpress_allocate_decompressor();
 	if (!ctx->decompressor)
@@ -590,8 +590,13 @@ static int read_and_decompress_chunk(struct ntfs_system_decompression_ctx *ctx,
 		return 0;
 
 	/* The chunk was stored compressed.  Decompress its data.  */
-	return decompress(ctx, read_buffer, stored_size,
-			  buffer, uncompressed_size);
+	if (decompress(ctx, read_buffer, stored_size,
+		       buffer, uncompressed_size)) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	return 0;
 }
 
 /* Retrieve a pointer to the uncompressed data of the specified chunk.  On
