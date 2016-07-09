@@ -19,6 +19,10 @@
  */
 #include "config.h"
 
+/* Although fuse.h is only needed for 'struct fuse_file_info', we still need to
+ * request a specific FUSE API version.  (It's required on FreeBSD, and it's
+ * probably a good idea to request the same version used by NTFS-3G anyway.) */
+#define FUSE_USE_VERSION 26
 #include <fuse.h>
 
 #ifdef HAVE_ERRNO_H
