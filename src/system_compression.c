@@ -64,6 +64,7 @@
 #include <ntfs-3g/attrib.h>
 #include <ntfs-3g/layout.h>
 #include <ntfs-3g/misc.h>
+#include <ntfs-3g/reparse.h>
 
 #include "system_compression.h"
 
@@ -152,9 +153,6 @@ static ntfschar compressed_stream_name[] = {
 /* The decompression context for a system compressed file  */
 struct ntfs_system_decompression_ctx {
 
-	/* The open compressed stream ("WofCompressedData")  */
-	ntfs_attr *na;
-
 	/* The compression format of the file  */
 	WOF_FILE_PROVIDER_COMPRESSION_FORMAT format;
 
@@ -228,13 +226,13 @@ static void free_decompressor(struct ntfs_system_decompression_ctx *ctx)
 }
 
 static int decompress(struct ntfs_system_decompression_ctx *ctx,
-		      const void *compressed_data, size_t compressed_size,
-		      void *uncompressed_data, size_t uncompressed_size)
+			  const void *compressed_data, size_t compressed_size,
+			  void *uncompressed_data, size_t uncompressed_size)
 {
 	if (ctx->format == FORMAT_LZX)
 		return lzx_decompress(ctx->decompressor,
-				      compressed_data, compressed_size,
-				      uncompressed_data, uncompressed_size);
+					  compressed_data, compressed_size,
+					  uncompressed_data, uncompressed_size);
 	else
 		return xpress_decompress(ctx->decompressor,
 					 compressed_data, compressed_size,
@@ -266,21 +264,21 @@ static int get_compression_format(ntfs_inode *ni, const REPARSE_POINT *reparse,
 			   le16_to_cpu(reparse->reparse_data_length);
 	} else {
 		rp = ntfs_attr_readall(ni, AT_REPARSE_POINT, AT_UNNAMED, 0,
-				       &rpbuflen);
+					   &rpbuflen);
 		if (!rp)
 			return -1;
 	}
 
 	/* Does the reparse point indicate a system compressed file?  */
 	if (rpbuflen >= (s64)sizeof(WOF_FILE_PROVIDER_REPARSE_POINT_V1) &&
-	    rp->reparse.reparse_tag == IO_REPARSE_TAG_WOF &&
-	    rp->wof.version == WOF_CURRENT_VERSION &&
-	    rp->wof.provider == WOF_PROVIDER_FILE &&
-	    rp->file.version == WOF_FILE_PROVIDER_CURRENT_VERSION &&
-	    (rp->file.compression_format == FORMAT_XPRESS4K ||
-	     rp->file.compression_format == FORMAT_XPRESS8K ||
-	     rp->file.compression_format == FORMAT_XPRESS16K ||
-	     rp->file.compression_format == FORMAT_LZX))
+		rp->reparse.reparse_tag == IO_REPARSE_TAG_WOF &&
+		rp->wof.version == WOF_CURRENT_VERSION &&
+		rp->wof.provider == WOF_PROVIDER_FILE &&
+		rp->file.version == WOF_FILE_PROVIDER_CURRENT_VERSION &&
+		(rp->file.compression_format == FORMAT_XPRESS4K ||
+		 rp->file.compression_format == FORMAT_XPRESS8K ||
+		 rp->file.compression_format == FORMAT_XPRESS16K ||
+		 rp->file.compression_format == FORMAT_LZX))
 	{
 		/* Yes, it's a system compressed file.  Save the compression
 		 * format identifier.  */
@@ -342,9 +340,9 @@ s64 ntfs_get_system_compressed_file_size(ntfs_inode *ni,
 		return -1;
 
 	ret = ntfs_attr_lookup(AT_DATA, compressed_stream_name,
-			       sizeof(compressed_stream_name) /
+				   sizeof(compressed_stream_name) /
 					sizeof(compressed_stream_name[0]),
-			       CASE_SENSITIVE, 0, NULL, 0, actx);
+				   CASE_SENSITIVE, 0, NULL, 0, actx);
 	if (!ret)
 		ret = ntfs_get_attribute_value_length(actx->attr);
 
@@ -385,11 +383,17 @@ ntfs_open_system_decompression_ctx(ntfs_inode *ni, const REPARSE_POINT *reparse)
 		goto err_free_ctx;
 
 	/* Open the WofCompressedData stream.  */
-	ctx->na = ntfs_attr_open(ni, AT_DATA, compressed_stream_name,
+	ntfs_attr *na = ntfs_attr_open(ni, AT_DATA, compressed_stream_name,
 				 sizeof(compressed_stream_name) /
 					sizeof(compressed_stream_name[0]));
-	if (!ctx->na)
+	if (!na)
 		goto err_free_decompressor;
+
+	/* The compressed size of a system compressed file is the size of its
+	 * WofCompressedData stream.  */
+	ctx->compressed_size = na->data_size;
+
+	ntfs_attr_close(na);
 
 	/* The uncompressed size of a system-compressed file is the size of its
 	 * unnamed data stream, which should be sparse so that it consumes no
@@ -404,9 +408,7 @@ ntfs_open_system_decompression_ctx(ntfs_inode *ni, const REPARSE_POINT *reparse)
 	ctx->num_chunks = (ctx->uncompressed_size +
 			   ctx->chunk_size - 1) >> ctx->chunk_order;
 
-	/* The compressed size of a system compressed file is the size of its
-	 * WofCompressedData stream.  */
-	ctx->compressed_size = ctx->na->data_size;
+
 
 	/* Initially, no chunk offsets are cached.  */
 	ctx->base_chunk_idx = INVALID_CHUNK_INDEX;
@@ -424,7 +426,6 @@ ntfs_open_system_decompression_ctx(ntfs_inode *ni, const REPARSE_POINT *reparse)
 err_close_ctx:
 	free(ctx->cached_chunk);
 	free(ctx->temp_buffer);
-	ntfs_attr_close(ctx->na);
 err_free_decompressor:
 	free_decompressor(ctx);
 err_free_ctx:
@@ -433,11 +434,24 @@ err:
 	return NULL;
 }
 
+/*
+ * ntfs_close_system_decompression_ctx - Close a system-compressed file
+ */
+void ntfs_close_system_decompression_ctx(struct ntfs_system_decompression_ctx *ctx)
+{
+	if (ctx) {
+		free(ctx->cached_chunk);
+		free(ctx->temp_buffer);
+		free_decompressor(ctx);
+		free(ctx);
+	}
+}
+
 /* Retrieve the stored offset and size of a chunk stored in the compressed file
  * stream.  */
-static int get_chunk_location(struct ntfs_system_decompression_ctx *ctx,
-			      u64 chunk_idx,
-			      u64 *offset_ret, u32 *stored_size_ret)
+static int get_chunk_location(struct ntfs_system_decompression_ctx *ctx, ntfs_attr *na,
+				  u64 chunk_idx,
+				  u64 *offset_ret, u32 *stored_size_ret)
 {
 	size_t cache_idx;
 
@@ -446,7 +460,7 @@ static int get_chunk_location(struct ntfs_system_decompression_ctx *ctx,
 	 * the needed offsets into the cache.  To reduce the number of chunk
 	 * table reads that may be required later, also load some extra.  */
 	if (chunk_idx < ctx->base_chunk_idx ||
-	    chunk_idx + 1 >= ctx->base_chunk_idx + NUM_CHUNK_OFFSETS)
+		chunk_idx + 1 >= ctx->base_chunk_idx + NUM_CHUNK_OFFSETS)
 	{
 		const u64 start_chunk = chunk_idx;
 		const u64 end_chunk =
@@ -475,10 +489,10 @@ static int get_chunk_location(struct ntfs_system_decompression_ctx *ctx,
 			num_entries_to_read++;
 
 		/* Read the chunk table entries into a temporary buffer.  */
-		res = ntfs_attr_pread(ctx->na,
-				      first_entry_to_read << entry_shift,
-				      num_entries_to_read << entry_shift,
-				      ctx->temp_buffer);
+		res = ntfs_attr_pread(na,
+					  first_entry_to_read << entry_shift,
+					  num_entries_to_read << entry_shift,
+					  ctx->temp_buffer);
 
 		if ((u64)res != num_entries_to_read << entry_shift) {
 			if (res >= 0)
@@ -541,7 +555,7 @@ static int get_chunk_location(struct ntfs_system_decompression_ctx *ctx,
 
 /* Retrieve into @buffer the uncompressed data of chunk @chunk_idx.  */
 static int read_and_decompress_chunk(struct ntfs_system_decompression_ctx *ctx,
-				     u64 chunk_idx, void *buffer)
+						ntfs_attr *na, u64 chunk_idx, void *buffer)
 {
 	u64 offset;
 	u32 stored_size;
@@ -550,14 +564,14 @@ static int read_and_decompress_chunk(struct ntfs_system_decompression_ctx *ctx,
 	s64 res;
 
 	/* Get the location of the chunk data as stored in the file.  */
-	if (get_chunk_location(ctx, chunk_idx, &offset, &stored_size))
+	if (get_chunk_location(ctx, na, chunk_idx, &offset, &stored_size))
 		return -1;
 
 	/* All chunks decompress to 'chunk_size' bytes except possibly the last,
 	 * which decompresses to whatever remains.  */
 	if (chunk_idx == ctx->num_chunks - 1)
 		uncompressed_size = ((ctx->uncompressed_size - 1) &
-				     (ctx->chunk_size - 1)) + 1;
+					 (ctx->chunk_size - 1)) + 1;
 	else
 		uncompressed_size = ctx->chunk_size;
 
@@ -578,7 +592,7 @@ static int read_and_decompress_chunk(struct ntfs_system_decompression_ctx *ctx,
 	}
 
 	/* Read the stored chunk data.  */
-	res = ntfs_attr_pread(ctx->na, offset, stored_size, read_buffer);
+	res = ntfs_attr_pread(na, offset, stored_size, read_buffer);
 	if (res != stored_size) {
 		if (res >= 0)
 			errno = EINVAL;
@@ -591,7 +605,7 @@ static int read_and_decompress_chunk(struct ntfs_system_decompression_ctx *ctx,
 
 	/* The chunk was stored compressed.  Decompress its data.  */
 	if (decompress(ctx, read_buffer, stored_size,
-		       buffer, uncompressed_size)) {
+			   buffer, uncompressed_size)) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -602,11 +616,11 @@ static int read_and_decompress_chunk(struct ntfs_system_decompression_ctx *ctx,
 /* Retrieve a pointer to the uncompressed data of the specified chunk.  On
  * failure, return NULL and set errno.  */
 static const void *get_chunk_data(struct ntfs_system_decompression_ctx *ctx,
-				  u64 chunk_idx)
+						  			ntfs_attr *na, u64 chunk_idx)
 {
 	if (chunk_idx != ctx->cached_chunk_idx) {
 		ctx->cached_chunk_idx = INVALID_CHUNK_INDEX;
-		if (read_and_decompress_chunk(ctx, chunk_idx, ctx->cached_chunk))
+		if (read_and_decompress_chunk(ctx, na, chunk_idx, ctx->cached_chunk))
 			return NULL;
 		ctx->cached_chunk_idx = chunk_idx;
 	}
@@ -617,6 +631,8 @@ static const void *get_chunk_data(struct ntfs_system_decompression_ctx *ctx,
  * ntfs_read_system_compressed_data - Read data from a system-compressed file
  *
  * @ctx:	The decompression context for the file
+ * @ni:		The NTFS inode for the file
+ * @reparse:	(Optional) the contents of the file's reparse point attribute
  * @pos:	The byte offset into the uncompressed data to read from
  * @count:	The number of bytes of uncompressed data to read
  * @buf:	The buffer into which to read the data
@@ -625,7 +641,8 @@ static const void *get_chunk_data(struct ntfs_system_decompression_ctx *ctx,
  * end-of-file).  On complete failure, return -1 and set errno.
  */
 ssize_t ntfs_read_system_compressed_data(struct ntfs_system_decompression_ctx *ctx,
-					 s64 pos, size_t count, void *buf)
+							ntfs_inode *ni, const REPARSE_POINT *reparse,
+							s64 pos, size_t count, void *buf)
 {
 	u64 offset;
 	u8 *p;
@@ -639,6 +656,13 @@ ssize_t ntfs_read_system_compressed_data(struct ntfs_system_decompression_ctx *c
 		return -1;
 	}
 
+	ntfs_attr *na = ntfs_attr_open(ni, AT_DATA, compressed_stream_name,
+					sizeof(compressed_stream_name) /
+						sizeof(compressed_stream_name[0]));
+	if (!na)
+		return -1;
+
+	
 	offset = (u64)pos;
 	if (offset >= ctx->uncompressed_size)
 		return 0;
@@ -658,12 +682,12 @@ ssize_t ntfs_read_system_compressed_data(struct ntfs_system_decompression_ctx *c
 
 		if (chunk_idx == ctx->num_chunks - 1)
 			chunk_size = ((ctx->uncompressed_size - 1) &
-				      (ctx->chunk_size - 1)) + 1;
+					  (ctx->chunk_size - 1)) + 1;
 
 		len_to_copy = min((size_t)(end_p - p),
 				  chunk_size - offset_in_chunk);
 
-		chunk = get_chunk_data(ctx, chunk_idx);
+		chunk = get_chunk_data(ctx, na, chunk_idx);
 		if (!chunk)
 			break;
 
@@ -674,19 +698,7 @@ ssize_t ntfs_read_system_compressed_data(struct ntfs_system_decompression_ctx *c
 		offset_in_chunk = 0;
 	} while (p != end_p);
 
-	return (p == buf) ? -1 : p - (u8 *)buf;
-}
+	ntfs_attr_close(na);
 
-/*
- * ntfs_close_system_decompression_ctx - Close a system-compressed file
- */
-void ntfs_close_system_decompression_ctx(struct ntfs_system_decompression_ctx *ctx)
-{
-	if (ctx) {
-		free(ctx->cached_chunk);
-		free(ctx->temp_buffer);
-		ntfs_attr_close(ctx->na);
-		free_decompressor(ctx);
-		free(ctx);
-	}
+	return (p == buf) ? -1 : p - (u8 *)buf;
 }

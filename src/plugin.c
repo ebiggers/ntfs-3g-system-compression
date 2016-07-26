@@ -51,50 +51,39 @@ static int compressed_getattr(ntfs_inode *ni, const REPARSE_POINT *reparse,
 	return -errno;
 }
 
-static int compressed_open(ntfs_inode *ni __attribute__((unused)),
-			   const REPARSE_POINT *reparse __attribute__((unused)),
-			   struct fuse_file_info *fi)
+static int compressed_open(ntfs_inode *ni, const REPARSE_POINT *reparse,
+							struct fuse_file_info *fi)
 {
 	if ((fi->flags & O_ACCMODE) != O_RDONLY)
 		return -EOPNOTSUPP;
-	return 0;
+
+	fi->fh = (uint64_t)ntfs_open_system_decompression_ctx(ni, reparse);
+
+	return fi->fh ? 0 : -errno;
 }
 
 static int compressed_release(ntfs_inode *ni __attribute__((unused)),
 			   const REPARSE_POINT *reparse __attribute__((unused)),
-			   struct fuse_file_info *fi __attribute__((unused)))
+					   struct fuse_file_info *fi)
 {
+	ntfs_close_system_decompression_ctx((struct ntfs_system_decompression_ctx*)fi->fh);
+	fi->fh = 0;
 	return 0;
 }
 
 static int compressed_read(ntfs_inode *ni, const REPARSE_POINT *reparse,
 			   char *buf, size_t size, off_t offset,
-			   struct fuse_file_info *fi __attribute__((unused)))
+			   struct fuse_file_info *fi)
 {
-	struct ntfs_system_decompression_ctx *dctx;
-	ssize_t res;
-
-	/* TODO: there needs to be more investigation into reusing decompression
-	 * contexts for multiple reads. */
-
-	dctx = ntfs_open_system_decompression_ctx(ni, reparse);
-	if (!dctx)
-		return -errno;
-
-	res = ntfs_read_system_compressed_data(dctx, offset, size, buf);
-
-	ntfs_close_system_decompression_ctx(dctx);
-
-	if (res < 0)
-		return -errno;
-	return res;
+	ssize_t res = ntfs_read_system_compressed_data((struct ntfs_system_decompression_ctx*)fi->fh, ni, reparse, offset, size, buf);
+	return res < 0 ? -errno : res;
 }
 
 static const struct plugin_operations ops = {
 	.getattr = compressed_getattr,
 	.open = compressed_open,
 	.release = compressed_release,
-	.read = compressed_read,
+	.read = compressed_read
 };
 
 const struct plugin_operations *init(le32 tag)

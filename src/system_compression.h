@@ -39,6 +39,7 @@ ntfs_open_system_decompression_ctx(ntfs_inode *ni,
 
 extern ssize_t
 ntfs_read_system_compressed_data(struct ntfs_system_decompression_ctx *ctx,
+                 ntfs_inode *ni, const REPARSE_POINT *reparse,
 				 s64 pos, size_t count, void *buf);
 
 extern void
