@@ -36,7 +36,7 @@ already exist.
 
 # Implementation note
 
-The XPRESS and LZX decompression formats used in system-compressed files are
+The XPRESS and LZX compression formats used in system-compressed files are
 identical to the formats used in Windows Imaging (WIM) archives.  Therefore, for
 the system compression plugin I borrowed the XPRESS and LZX decompressors I had
 already written for the wimlib project (https://wimlib.net/).  I made some
