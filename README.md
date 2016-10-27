@@ -22,10 +22,14 @@ by using the "compact" utility on Windows, with one of the options below
 
 # Installation
 
-The plugin can be built by running `./configure && make`.  The build system must
-be able to find the NTFS-3G library and headers.  On some platforms this may
-require that the "ntfs-3g-dev" package or similar be installed in addition to
-the main "ntfs-3g" package.
+First, if you're building from the git repository instead of from a release
+tarball, you'll need to generate the `configure` script by running
+`autoreconf -i`.  This requires GNU autoconf, automake, and libtool.
+
+The plugin can then be built by running `./configure && make`.  The build system
+must be able to find the NTFS-3G library and headers.  On some platforms this
+may require that the "ntfs-3g-dev" package or similar be installed in addition
+to the main "ntfs-3g" package.
 
 After compiling, run `make install` to install the plugin to the NTFS-3G plugin
 directory, which will be a subdirectory "ntfs-3g" of the system library
