@@ -1,4 +1,4 @@
-AC_INIT([ntfs-3g-system-compression], [0.2], [ebiggers3@gmail.com])
+AC_INIT([ntfs-3g-system-compression], [0.3], [ebiggers3@gmail.com])
 
 AC_CONFIG_SRCDIR([src/plugin.c])
 AC_CONFIG_MACRO_DIR([m4])

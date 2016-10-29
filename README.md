@@ -49,6 +49,12 @@ licensed LGPLv3+, but I have relicensed the version in this plugin to GPLv2+ for
 consistency with NTFS-3G's license.  (Public domain portions remain public
 domain.)
 
+# Known issues
+
+Various problems occur if the NTFS volume is mounted with `lowntfs-3g` instead
+of with `ntfs-3g`.  This is caused by a bug in `lowntfs-3g`, and a fix to
+`lowntfs-3g` has been proposed.
+
 # Notices
 
 The NTFS-3G system compression plugin was written by Eric Biggers, with

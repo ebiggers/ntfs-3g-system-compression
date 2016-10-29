@@ -34,6 +34,27 @@
 
 #include "system_compression.h"
 
+/*
+ * For each open file description for a system-compressed file, we cache an
+ * ntfs_system_decompression_ctx for the file in the FUSE file handle.
+ *
+ * A decompression context includes a decompressor, cached data, and cached
+ * metadata.  It does not include an open ntfs_inode for the file or an open
+ * ntfs_attr for the file's compressed stream.  This is necessary because
+ * NTFS-3G is not guaranteed to keep the inode open the whole time the file is
+ * open.  Indeed, NTFS-3G may close an inode after a read request and re-open it
+ * for the next one, though it does maintain an open inode cache.
+ *
+ * As a result of the decompression context caching, the results of reads from a
+ * system-compressed file that has been written to since being opened for
+ * reading are unspecified.  Stale data might be returned.  Currently, this
+ * doesn't matter because this plugin blocks writes to system-compressed files.
+ * (It might still be possible for adventurous users to play with the
+ * WofCompressedData named data stream directly.)
+ */
+#define DECOMPRESSION_CTX(fi) \
+	((struct ntfs_system_decompression_ctx *)(uintptr_t)((fi)->fh))
+
 static int compressed_getattr(ntfs_inode *ni, const REPARSE_POINT *reparse,
 			      struct stat *stbuf)
 {
@@ -51,40 +72,38 @@ static int compressed_getattr(ntfs_inode *ni, const REPARSE_POINT *reparse,
 	return -errno;
 }
 
-static int compressed_open(ntfs_inode *ni __attribute__((unused)),
-			   const REPARSE_POINT *reparse __attribute__((unused)),
+static int compressed_open(ntfs_inode *ni, const REPARSE_POINT *reparse,
 			   struct fuse_file_info *fi)
 {
+	struct ntfs_system_decompression_ctx *dctx;
+
 	if ((fi->flags & O_ACCMODE) != O_RDONLY)
 		return -EOPNOTSUPP;
-	return 0;
-}
-
-static int compressed_release(ntfs_inode *ni __attribute__((unused)),
-			   const REPARSE_POINT *reparse __attribute__((unused)),
-			   struct fuse_file_info *fi __attribute__((unused)))
-{
-	return 0;
-}
-
-static int compressed_read(ntfs_inode *ni, const REPARSE_POINT *reparse,
-			   char *buf, size_t size, off_t offset,
-			   struct fuse_file_info *fi __attribute__((unused)))
-{
-	struct ntfs_system_decompression_ctx *dctx;
-	ssize_t res;
-
-	/* TODO: there needs to be more investigation into reusing decompression
-	 * contexts for multiple reads. */
 
 	dctx = ntfs_open_system_decompression_ctx(ni, reparse);
 	if (!dctx)
 		return -errno;
 
-	res = ntfs_read_system_compressed_data(dctx, offset, size, buf);
+	fi->fh = (uintptr_t)dctx;
+	return 0;
+}
 
-	ntfs_close_system_decompression_ctx(dctx);
+static int compressed_release(ntfs_inode *ni __attribute__((unused)),
+			   const REPARSE_POINT *reparse __attribute__((unused)),
+			   struct fuse_file_info *fi)
+{
+	ntfs_close_system_decompression_ctx(DECOMPRESSION_CTX(fi));
+	return 0;
+}
 
+static int compressed_read(ntfs_inode *ni, const REPARSE_POINT *reparse,
+			   char *buf, size_t size, off_t offset,
+			   struct fuse_file_info *fi)
+{
+	ssize_t res;
+
+	res = ntfs_read_system_compressed_data(DECOMPRESSION_CTX(fi), ni,
+					       offset, size, buf);
 	if (res < 0)
 		return -errno;
 	return res;
