@@ -1,4 +1,4 @@
-AC_INIT([ntfs-3g-system-compression], [0.3], [ebiggers3@gmail.com])
+AC_INIT([ntfs-3g-system-compression], [0.4], [ebiggers3@gmail.com])
 
 AC_CONFIG_SRCDIR([src/plugin.c])
 AC_CONFIG_MACRO_DIR([m4])
@@ -23,7 +23,6 @@ AC_CHECK_HEADERS([errno.h \
 		  string.h \
 		  sys/types.h])
 
-# TODO: should be changed to require 2017.#.## when released
-PKG_CHECK_MODULES([LIBNTFS_3G], [libntfs-3g >= 2016.2.22], [],
+PKG_CHECK_MODULES([LIBNTFS_3G], [libntfs-3g >= 2017.3.23], [],
 		  [AC_MSG_ERROR(["Unable to find libntfs-3g"])])
 AC_OUTPUT

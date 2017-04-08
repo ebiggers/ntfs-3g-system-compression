@@ -8,7 +8,7 @@ Windows 10 systems have been using it by default.
 
 This repository contains a plugin which enables the NTFS-3G FUSE driver to
 transparently read from system-compressed files.  It must be built against
-NTFS-3G version 2016.2.22AR.1 or later, since that was the first version to
+NTFS-3G version 2017.3.23 or later, since that was the first stable version to
 include support for reparse point plugins.
 
 Currently, only reading is supported.  Compressing an existing file may be done
@@ -48,12 +48,6 @@ slight modifications for integration purposes.  The code in wimlib is currently
 licensed LGPLv3+, but I have relicensed the version in this plugin to GPLv2+ for
 consistency with NTFS-3G's license.  (Public domain portions remain public
 domain.)
-
-# Known issues
-
-Various problems occur if the NTFS volume is mounted with `lowntfs-3g` instead
-of with `ntfs-3g`.  This is caused by a bug in `lowntfs-3g`, and a fix to
-`lowntfs-3g` has been proposed.
 
 # Notices
 
