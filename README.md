@@ -22,9 +22,11 @@ by using the "compact" utility on Windows, with one of the options below
 
 # Installation
 
-First, if you're building from the git repository instead of from a release
-tarball, you'll need to generate the `configure` script by running
-`autoreconf -i`.  This requires autoconf, automake, libtool, and pkg-config.
+First, either download and extract the latest release tarball from
+https://github.com/ebiggers/ntfs-3g-system-compression/releases, or clone the
+git repository.  If you're building from the git repository, you'll need to
+generate the `configure` script by running `autoreconf -i`.  This requires
+autoconf, automake, libtool, and pkg-config.
 
 The plugin can then be built by running `./configure && make`.  The build system
 must be able to find the NTFS-3G library and headers as well as the FUSE
