@@ -25,4 +25,6 @@ AC_CHECK_HEADERS([errno.h \
 
 PKG_CHECK_MODULES([LIBNTFS_3G], [libntfs-3g >= 2017.3.23], [],
 		  [AC_MSG_ERROR(["Unable to find libntfs-3g"])])
+PKG_CHECK_MODULES([FUSE], [fuse >= 2.6.0], [],
+		  [AC_MSG_ERROR(["Unable to find fuse"])])
 AC_OUTPUT
