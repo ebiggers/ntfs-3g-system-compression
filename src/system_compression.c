@@ -92,14 +92,14 @@ typedef enum {
 typedef struct {
 	le32 version;
 	le32 provider;
-} WOF_EXTERNAL_INFO;
+} __attribute__((packed)) WOF_EXTERNAL_INFO;
 
 /* Metadata for the compressed file provider --- indicates how the file
  * is compressed  */
 typedef struct {
 	le32 version;
 	le32 compression_format;
-} WOF_FILE_PROVIDER_EXTERNAL_INFO_V1;
+} __attribute__((packed)) WOF_FILE_PROVIDER_EXTERNAL_INFO_V1;
 
 /* Format of the reparse point attribute of system compressed files  */
 typedef struct {
@@ -114,7 +114,7 @@ typedef struct {
 	/* The metadata specific to the compressed file "provider"  */
 	WOF_FILE_PROVIDER_EXTERNAL_INFO_V1 file;
 
-} WOF_FILE_PROVIDER_REPARSE_POINT_V1;
+} __attribute__((packed)) WOF_FILE_PROVIDER_REPARSE_POINT_V1;
 
 /* The available compression formats for system compressed files  */
 typedef enum {
