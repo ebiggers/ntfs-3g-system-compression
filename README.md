@@ -22,24 +22,26 @@ by using the "compact" utility on Windows, with one of the options below
 
 # Installation
 
-First, either download and extract the latest release tarball from
-https://github.com/ebiggers/ntfs-3g-system-compression/releases, or clone the
-git repository.  If you're building from the git repository, you'll need to
-generate the `configure` script by running `autoreconf -i`.  This requires
-autoconf, automake, libtool, and pkg-config.
+First, either clone the git repository, or download and extract the latest
+release tarball from
+https://github.com/ebiggers/ntfs-3g-system-compression/releases.
 
-The plugin can then be built by running `./configure && make`.  The build system
-must be able to find the NTFS-3G library and headers as well as the FUSE
-headers.  Depending on the operating system, this may require that the
-"ntfs-3g-dev" and "libfuse-dev" (or similarly named) packages be installed.
-pkg-config must also be installed.
+Then, install prerequisite packages.  For example, on Ubuntu and other
+Debian-based systems, run:
 
-After compiling, run `make install` to install the plugin to the NTFS-3G plugin
-directory, which will be a subdirectory "ntfs-3g" of the system library
-directory (`$libdir`).  An example full path to the installed plugin is
-`/usr/lib/ntfs-3g/ntfs-plugin-80000017.so`.  It may differ slightly on different
-platforms.  `make install` will create the plugin directory if it does not
-already exist.
+    sudo apt install make gcc autoconf automake libtool pkg-config ntfs-3g ntfs-3g-dev
+
+Then, run the following to build and install the plugin:
+
+    # Set LIBDIR to the parent directory of the NTFS-3G plugin directory.
+    # This is usually /usr/lib or /usr/lib/x86_64-linux-gnu.
+    # The below command tries to find it automatically.
+    LIBDIR=$(strings $(which ntfs-3g) | grep ntfs-plugin | sed 's@/ntfs-3g/.*@@')
+
+    autoreconf -i
+    ./configure --libdir="$LIBDIR"
+    make
+    sudo make install
 
 # Implementation note
 
