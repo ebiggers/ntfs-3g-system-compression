@@ -19,20 +19,25 @@
  */
 #include "config.h"
 
-/* Although fuse.h is only needed for 'struct fuse_file_info', we still need to
- * request a specific FUSE API version.  (It's required on FreeBSD, and it's
- * probably a good idea to request the same version used by NTFS-3G anyway.) */
-#define FUSE_USE_VERSION 26
-#include <fuse.h>
-
-#ifdef HAVE_ERRNO_H
 #include <errno.h>
-#endif
-
+#include <fcntl.h>
 #include <ntfs-3g/inode.h>
 #include <ntfs-3g/plugin.h>
 
 #include "system_compression.h"
+
+/* ntfs-3g/plugin.h is missing this definition, so define it here... */
+struct fuse_file_info {
+	int flags;
+	unsigned long fh_old;
+	int writepage;
+	unsigned int direct_io : 1;
+	unsigned int keep_cache : 1;
+	unsigned int flush : 1;
+	unsigned int padding : 29;
+	uint64_t fh;
+	uint64_t lock_owner;
+};
 
 /*
  * For each open file description for a system-compressed file, we cache an
