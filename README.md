@@ -20,6 +20,9 @@ by using the "compact" utility on Windows, with one of the options below
 	/exe:xpress16k
 	/exe:lzx
 
+Note: consider using the "ntfs3" driver in the Linux kernel as an alternative to
+this project.  It has native support for system-compressed files.
+
 # Installation
 
 First, either clone the git repository, or download and extract the latest
